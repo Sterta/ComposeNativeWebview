@@ -61,6 +61,60 @@ class WryWebViewPanel(initialUrl: String) : JPanel() {
         log("loadUrl url=$url webviewId=$webviewId")
     }
 
+    fun goBack() {
+        val action = { webviewId?.let { NativeBindings.goBack(it) } }
+        if (SwingUtilities.isEventDispatchThread()) {
+            action()
+        } else {
+            SwingUtilities.invokeLater { action() }
+        }
+        log("goBack webviewId=$webviewId")
+    }
+
+    fun goForward() {
+        val action = { webviewId?.let { NativeBindings.goForward(it) } }
+        if (SwingUtilities.isEventDispatchThread()) {
+            action()
+        } else {
+            SwingUtilities.invokeLater { action() }
+        }
+        log("goForward webviewId=$webviewId")
+    }
+
+    fun reload() {
+        val action = { webviewId?.let { NativeBindings.reload(it) } }
+        if (SwingUtilities.isEventDispatchThread()) {
+            action()
+        } else {
+            SwingUtilities.invokeLater { action() }
+        }
+        log("reload webviewId=$webviewId")
+    }
+
+    fun getCurrentUrl(): String? {
+        return webviewId?.let {
+            try {
+                NativeBindings.getUrl(it)
+            } catch (e: Exception) {
+                log("getCurrentUrl failed: ${e.message}")
+                null
+            }
+        }
+    }
+
+    fun isLoading(): Boolean {
+        return webviewId?.let {
+            try {
+                NativeBindings.isLoading(it)
+            } catch (e: Exception) {
+                log("isLoading failed: ${e.message}")
+                true
+            }
+        } ?: true
+    }
+
+    fun isReady(): Boolean = webviewId != null
+
     private fun createIfNeeded(): Boolean {
         if (webviewId != null) return true
         if (!host.isDisplayable || !host.isShowing) return false
@@ -304,6 +358,26 @@ private object NativeBindings {
 
     fun loadUrl(id: ULong, url: String) {
         io.github.kdroidfilter.composewebview.wry.loadUrl(id, url)
+    }
+
+    fun goBack(id: ULong) {
+        io.github.kdroidfilter.composewebview.wry.goBack(id)
+    }
+
+    fun goForward(id: ULong) {
+        io.github.kdroidfilter.composewebview.wry.goForward(id)
+    }
+
+    fun reload(id: ULong) {
+        io.github.kdroidfilter.composewebview.wry.reload(id)
+    }
+
+    fun getUrl(id: ULong): String {
+        return io.github.kdroidfilter.composewebview.wry.getUrl(id)
+    }
+
+    fun isLoading(id: ULong): Boolean {
+        return io.github.kdroidfilter.composewebview.wry.isLoading(id)
     }
 
     fun destroyWebview(id: ULong) {

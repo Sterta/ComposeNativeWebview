@@ -391,6 +391,89 @@ pub fn load_url(id: u64, url: String) -> Result<(), WebViewError> {
     run_on_main_thread(move || load_url_inner(id, url))
 }
 
+fn go_back_inner(id: u64) -> Result<(), WebViewError> {
+    eprintln!("[wrywebview] go_back id={}", id);
+    with_webview(id, |webview| {
+        webview.evaluate_script("window.history.back()").map_err(WebViewError::from)
+    })
+}
+
+#[uniffi::export]
+pub fn go_back(id: u64) -> Result<(), WebViewError> {
+    #[cfg(target_os = "linux")]
+    {
+        return run_on_gtk_thread(move || go_back_inner(id));
+    }
+    run_on_main_thread(move || go_back_inner(id))
+}
+
+fn go_forward_inner(id: u64) -> Result<(), WebViewError> {
+    eprintln!("[wrywebview] go_forward id={}", id);
+    with_webview(id, |webview| {
+        webview.evaluate_script("window.history.forward()").map_err(WebViewError::from)
+    })
+}
+
+#[uniffi::export]
+pub fn go_forward(id: u64) -> Result<(), WebViewError> {
+    #[cfg(target_os = "linux")]
+    {
+        return run_on_gtk_thread(move || go_forward_inner(id));
+    }
+    run_on_main_thread(move || go_forward_inner(id))
+}
+
+fn reload_inner(id: u64) -> Result<(), WebViewError> {
+    eprintln!("[wrywebview] reload id={}", id);
+    with_webview(id, |webview| {
+        webview.evaluate_script("window.location.reload()").map_err(WebViewError::from)
+    })
+}
+
+#[uniffi::export]
+pub fn reload(id: u64) -> Result<(), WebViewError> {
+    #[cfg(target_os = "linux")]
+    {
+        return run_on_gtk_thread(move || reload_inner(id));
+    }
+    run_on_main_thread(move || reload_inner(id))
+}
+
+fn get_url_inner(id: u64) -> Result<String, WebViewError> {
+    with_webview(id, |webview| {
+        Ok(webview.url().map(|u| u.to_string()).unwrap_or_default())
+    })
+}
+
+#[uniffi::export]
+pub fn get_url(id: u64) -> Result<String, WebViewError> {
+    #[cfg(target_os = "linux")]
+    {
+        return run_on_gtk_thread(move || get_url_inner(id));
+    }
+    run_on_main_thread(move || get_url_inner(id))
+}
+
+fn is_loading_inner(id: u64) -> Result<bool, WebViewError> {
+    with_webview(id, |webview| {
+        // Check if we can get the URL - if we can and it's not about:blank, we're not loading
+        // This is a workaround since evaluate_script doesn't return values synchronously
+        match webview.url() {
+            Ok(url) => Ok(url.as_str() == "about:blank"),
+            Err(_) => Ok(true), // If we can't get URL, assume still loading
+        }
+    })
+}
+
+#[uniffi::export]
+pub fn is_loading(id: u64) -> Result<bool, WebViewError> {
+    #[cfg(target_os = "linux")]
+    {
+        return run_on_gtk_thread(move || is_loading_inner(id));
+    }
+    run_on_main_thread(move || is_loading_inner(id))
+}
+
 fn destroy_webview_inner(id: u64) -> Result<(), WebViewError> {
     eprintln!("[wrywebview] destroy_webview id={}", id);
     let entry = {
