@@ -28,6 +28,8 @@ kotlin {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutinesSwing)
             implementation(project(":wrywebview-compose"))
+            implementation(project(":wrywebview"))
+
         }
     }
 }

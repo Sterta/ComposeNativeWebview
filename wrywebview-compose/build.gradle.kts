@@ -12,7 +12,7 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.ui)
             implementation(compose.desktop.currentOs)
-            implementation(project(":wrywebview"))
+            api(project(":wrywebview"))
         }
     }
 }

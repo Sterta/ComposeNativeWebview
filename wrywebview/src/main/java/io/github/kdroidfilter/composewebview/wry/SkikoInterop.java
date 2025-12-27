@@ -8,7 +8,15 @@ final class SkikoInterop {
     private SkikoInterop() {}
 
     static Canvas createHost() {
+        if (isWindows()) {
+            return new Canvas();
+        }
         return new HardwareLayer();
+    }
+
+    private static boolean isWindows() {
+        String osName = System.getProperty("os.name");
+        return osName != null && osName.toLowerCase().contains("windows");
     }
 
     static long getContentHandle(Component component) {

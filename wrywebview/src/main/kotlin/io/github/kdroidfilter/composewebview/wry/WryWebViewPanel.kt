@@ -16,6 +16,7 @@ class WryWebViewPanel(initialUrl: String) : JPanel() {
     private var pendingUrl: String = initialUrl
     private var createTimer: Timer? = null
     private var gtkTimer: Timer? = null
+    private var windowsTimer: Timer? = null
     private var skikoInitialized: Boolean = false
     private var lastBounds: Bounds? = null
 
@@ -62,6 +63,11 @@ class WryWebViewPanel(initialUrl: String) : JPanel() {
         if (webviewId != null) return true
         if (!host.isDisplayable || !host.isShowing) return false
         if (host.width <= 0 || host.height <= 0) return false
+        // On Windows, wait for the window to be fully visible
+        if (IS_WINDOWS) {
+            val window = SwingUtilities.getWindowAncestor(host)
+            if (window == null || !window.isShowing) return false
+        }
         if (!skikoInitialized) {
             skikoInitialized = try {
                 val initResult = SkikoInterop.init(host)
@@ -88,6 +94,7 @@ class WryWebViewPanel(initialUrl: String) : JPanel() {
             )
             updateBounds()
             startGtkPumpIfNeeded()
+            startWindowsPumpIfNeeded()
             log("createIfNeeded success id=$webviewId")
             true
         } catch (e: RuntimeException) {
@@ -99,6 +106,7 @@ class WryWebViewPanel(initialUrl: String) : JPanel() {
 
     private fun destroyIfNeeded() {
         stopGtkPump()
+        stopWindowsPump()
         webviewId?.let {
             log("destroy id=$it")
             NativeBindings.destroyWebview(it)
@@ -130,10 +138,22 @@ class WryWebViewPanel(initialUrl: String) : JPanel() {
         gtkTimer = null
     }
 
+    private fun startWindowsPumpIfNeeded() {
+        if (!IS_WINDOWS || windowsTimer != null) return
+        log("startWindowsPump")
+        windowsTimer = Timer(16) { NativeBindings.pumpWindowsEvents() }.apply { start() }
+    }
+
+    private fun stopWindowsPump() {
+        windowsTimer?.stop()
+        windowsTimer = null
+    }
+
     private fun scheduleCreateIfNeeded() {
         if (webviewId != null || createTimer != null) return
         log("scheduleCreateIfNeeded")
-        createTimer = Timer(16) {
+        val delay = if (IS_WINDOWS) 100 else 16
+        createTimer = Timer(delay) {
             if (createIfNeeded()) {
                 stopCreateTimer()
             }
@@ -161,7 +181,18 @@ class WryWebViewPanel(initialUrl: String) : JPanel() {
     private fun resolveParentHandle(): ParentHandle? {
         val contentHandle = safeSkikoHandle("content") { SkikoInterop.getContentHandle(host) }
         val windowHandle = safeSkikoHandle("window") { SkikoInterop.getWindowHandle(host) }
-        if (IS_MAC) {
+        if (IS_WINDOWS) {
+            // On Windows, use the window handle and position webview manually
+            // Canvas HWND doesn't work well as WebView2 parent
+            val window = SwingUtilities.getWindowAncestor(host)
+            if (window != null && window.isDisplayable && window.isShowing) {
+                val windowHandleJna = componentHandle(window)
+                if (windowHandleJna != 0UL) {
+                    log("resolveParentHandle jna window=0x${windowHandleJna.toString(16)} (windows)")
+                    return ParentHandle(windowHandleJna, true)
+                }
+            }
+        } else if (IS_MAC) {
             if (contentHandle != 0L && contentHandle != windowHandle) {
                 log("resolveParentHandle skiko content=0x${contentHandle.toString(16)} window=0x${windowHandle.toString(16)} (macOS content)")
                 return ParentHandle(contentHandle.toULong(), false)
@@ -229,12 +260,10 @@ class WryWebViewPanel(initialUrl: String) : JPanel() {
     private data class Bounds(val x: Int, val y: Int, val width: Int, val height: Int)
 
     private companion object {
-        private val IS_LINUX = System.getProperty("os.name")
-            ?.lowercase()
-            ?.contains("linux") == true
-        private val IS_MAC = System.getProperty("os.name")
-            ?.lowercase()
-            ?.contains("mac") == true
+        private val OS_NAME = System.getProperty("os.name")?.lowercase().orEmpty()
+        private val IS_LINUX = OS_NAME.contains("linux")
+        private val IS_MAC = OS_NAME.contains("mac")
+        private val IS_WINDOWS = OS_NAME.contains("windows")
     }
 }
 
@@ -257,5 +286,9 @@ private object NativeBindings {
 
     fun pumpGtkEvents() {
         io.github.kdroidfilter.composewebview.wry.pumpGtkEvents()
+    }
+
+    fun pumpWindowsEvents() {
+        io.github.kdroidfilter.composewebview.wry.pumpWindowsEvents()
     }
 }
