@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock, Arc};
 use std::thread::ThreadId;
 
 use wry::dpi::{LogicalPosition, LogicalSize};
@@ -73,10 +73,25 @@ impl HasWindowHandle for RawWindow {
     }
 }
 
-#[derive(Clone, Copy)]
+struct WebViewState {
+    is_loading: AtomicBool,
+    current_url: Mutex<String>,
+}
+
 struct WebViewEntry {
     ptr: *mut WebView,
     thread_id: ThreadId,
+    state: Arc<WebViewState>,
+}
+
+impl Clone for WebViewEntry {
+    fn clone(&self) -> Self {
+        WebViewEntry {
+            ptr: self.ptr,
+            thread_id: self.thread_id,
+            state: Arc::clone(&self.state),
+        }
+    }
 }
 
 // The raw pointer is only dereferenced on the creating thread (checked at runtime).
@@ -299,15 +314,49 @@ fn create_webview_inner(
     #[cfg(target_os = "linux")]
     ensure_gtk_initialized()?;
 
+    // Create shared state for tracking loading and URL
+    let state = Arc::new(WebViewState {
+        is_loading: AtomicBool::new(true),
+        current_url: Mutex::new(url.clone()),
+    });
+
+    let state_for_nav = Arc::clone(&state);
+    let state_for_load = Arc::clone(&state);
+
     let webview = WebViewBuilder::new()
         .with_url(&url)
         .with_bounds(make_bounds(0, 0, width, height))
+        .with_navigation_handler(move |new_url| {
+            eprintln!("[wrywebview] navigation_handler url={}", new_url);
+            // Navigation started
+            state_for_nav.is_loading.store(true, Ordering::SeqCst);
+            if let Ok(mut current) = state_for_nav.current_url.lock() {
+                *current = new_url.clone();
+            }
+            true // Allow navigation
+        })
+        .with_on_page_load_handler(move |event, url| {
+            match event {
+                wry::PageLoadEvent::Started => {
+                    eprintln!("[wrywebview] page_load_handler event=Started url={}", url);
+                    state_for_load.is_loading.store(true, Ordering::SeqCst);
+                }
+                wry::PageLoadEvent::Finished => {
+                    eprintln!("[wrywebview] page_load_handler event=Finished url={}", url);
+                    state_for_load.is_loading.store(false, Ordering::SeqCst);
+                    if let Ok(mut current) = state_for_load.current_url.lock() {
+                        *current = url.clone();
+                    }
+                }
+            }
+        })
         .build_as_child(&window)?;
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let entry = WebViewEntry {
         ptr: Box::into_raw(Box::new(webview)),
         thread_id: std::thread::current().id(),
+        state,
     };
 
     let mut map = webviews()
@@ -379,6 +428,10 @@ pub fn set_bounds(
 
 fn load_url_inner(id: u64, url: String) -> Result<(), WebViewError> {
     eprintln!("[wrywebview] load_url id={} url={}", id, url);
+    // Mark as loading before starting navigation
+    if let Ok(state) = get_state(id) {
+        state.is_loading.store(true, Ordering::SeqCst);
+    }
     with_webview(id, |webview| webview.load_url(&url).map_err(WebViewError::from))
 }
 
@@ -393,6 +446,9 @@ pub fn load_url(id: u64, url: String) -> Result<(), WebViewError> {
 
 fn go_back_inner(id: u64) -> Result<(), WebViewError> {
     eprintln!("[wrywebview] go_back id={}", id);
+    if let Ok(state) = get_state(id) {
+        state.is_loading.store(true, Ordering::SeqCst);
+    }
     with_webview(id, |webview| {
         webview.evaluate_script("window.history.back()").map_err(WebViewError::from)
     })
@@ -409,6 +465,9 @@ pub fn go_back(id: u64) -> Result<(), WebViewError> {
 
 fn go_forward_inner(id: u64) -> Result<(), WebViewError> {
     eprintln!("[wrywebview] go_forward id={}", id);
+    if let Ok(state) = get_state(id) {
+        state.is_loading.store(true, Ordering::SeqCst);
+    }
     with_webview(id, |webview| {
         webview.evaluate_script("window.history.forward()").map_err(WebViewError::from)
     })
@@ -425,6 +484,9 @@ pub fn go_forward(id: u64) -> Result<(), WebViewError> {
 
 fn reload_inner(id: u64) -> Result<(), WebViewError> {
     eprintln!("[wrywebview] reload id={}", id);
+    if let Ok(state) = get_state(id) {
+        state.is_loading.store(true, Ordering::SeqCst);
+    }
     with_webview(id, |webview| {
         webview.evaluate_script("window.location.reload()").map_err(WebViewError::from)
     })
@@ -439,39 +501,45 @@ pub fn reload(id: u64) -> Result<(), WebViewError> {
     run_on_main_thread(move || reload_inner(id))
 }
 
-fn get_url_inner(id: u64) -> Result<String, WebViewError> {
+fn focus_inner(id: u64) -> Result<(), WebViewError> {
+    eprintln!("[wrywebview] focus id={}", id);
     with_webview(id, |webview| {
-        Ok(webview.url().map(|u| u.to_string()).unwrap_or_default())
+        // Focus the webview by focusing the document
+        webview.evaluate_script("document.documentElement.focus(); window.focus();").map_err(WebViewError::from)
     })
+}
+
+#[uniffi::export]
+pub fn focus(id: u64) -> Result<(), WebViewError> {
+    #[cfg(target_os = "linux")]
+    {
+        return run_on_gtk_thread(move || focus_inner(id));
+    }
+    run_on_main_thread(move || focus_inner(id))
+}
+
+fn get_state(id: u64) -> Result<Arc<WebViewState>, WebViewError> {
+    let map = webviews()
+        .lock()
+        .map_err(|_| WebViewError::Internal("webview registry lock poisoned".to_string()))?;
+    let entry = map
+        .get(&id)
+        .ok_or(WebViewError::WebViewNotFound(id))?;
+    Ok(Arc::clone(&entry.state))
 }
 
 #[uniffi::export]
 pub fn get_url(id: u64) -> Result<String, WebViewError> {
-    #[cfg(target_os = "linux")]
-    {
-        return run_on_gtk_thread(move || get_url_inner(id));
-    }
-    run_on_main_thread(move || get_url_inner(id))
-}
-
-fn is_loading_inner(id: u64) -> Result<bool, WebViewError> {
-    with_webview(id, |webview| {
-        // Check if we can get the URL - if we can and it's not about:blank, we're not loading
-        // This is a workaround since evaluate_script doesn't return values synchronously
-        match webview.url() {
-            Ok(url) => Ok(url.as_str() == "about:blank"),
-            Err(_) => Ok(true), // If we can't get URL, assume still loading
-        }
-    })
+    let state = get_state(id)?;
+    let url = state.current_url.lock()
+        .map_err(|_| WebViewError::Internal("url lock poisoned".to_string()))?;
+    Ok(url.clone())
 }
 
 #[uniffi::export]
 pub fn is_loading(id: u64) -> Result<bool, WebViewError> {
-    #[cfg(target_os = "linux")]
-    {
-        return run_on_gtk_thread(move || is_loading_inner(id));
-    }
-    run_on_main_thread(move || is_loading_inner(id))
+    let state = get_state(id)?;
+    Ok(state.is_loading.load(Ordering::SeqCst))
 }
 
 fn destroy_webview_inner(id: u64) -> Result<(), WebViewError> {
