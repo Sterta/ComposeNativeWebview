@@ -38,6 +38,7 @@ kotlin {
 compose.desktop {
     application {
         mainClass = "io.github.kdroidfilter.composewebview.MainKt"
+        jvmArgs += "--enable-native-access=ALL-UNNAMED"
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
