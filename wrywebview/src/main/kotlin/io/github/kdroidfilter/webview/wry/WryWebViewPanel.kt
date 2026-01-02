@@ -3,6 +3,8 @@ package io.github.kdroidfilter.webview.wry
 import com.sun.jna.Native
 import java.awt.BorderLayout
 import java.awt.Component
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 import javax.swing.Timer
@@ -32,6 +34,12 @@ class WryWebViewPanel(
     init {
         layout = BorderLayout()
         add(host, BorderLayout.CENTER)
+        // Request focus when clicked to capture keyboard events
+        host.addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent?) {
+                requestWebViewFocus()
+            }
+        })
         log("init url=$initialUrl")
     }
 
@@ -261,6 +269,16 @@ class WryWebViewPanel(
     }
 
     fun isReady(): Boolean = webviewId != null
+
+    fun requestWebViewFocus() {
+        val action = { webviewId?.let { NativeBindings.focus(it) } }
+        if (SwingUtilities.isEventDispatchThread()) {
+            action()
+        } else {
+            SwingUtilities.invokeLater { action() }
+        }
+        log("requestWebViewFocus webviewId=$webviewId")
+    }
 
     private fun createIfNeeded(): Boolean {
         if (webviewId != null) return true
@@ -627,5 +645,9 @@ private object NativeBindings {
 
     fun pumpWindowsEvents() {
         io.github.kdroidfilter.webview.wry.pumpWindowsEvents()
+    }
+
+    fun focus(id: ULong) {
+        io.github.kdroidfilter.webview.wry.focus(id)
     }
 }

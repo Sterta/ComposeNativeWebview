@@ -45,10 +45,17 @@ internal class DesktopWebView(
                 when (readType) {
                     WebViewFileReadType.ASSET_RESOURCES -> {
                         val normalized = fileName.removePrefix("/")
-                        val path = if (normalized.startsWith("assets/")) normalized else "assets/$normalized"
-                        this::class.java.classLoader.getResourceAsStream(path)
-                            ?.use { it.readBytes().toString(Charsets.UTF_8) }
-                            ?: error("Resource not found: $path")
+                        val candidates =
+                            listOf(
+                                if (normalized.startsWith("assets/")) normalized else "assets/$normalized",
+                                if (normalized.startsWith("compose-resources/")) normalized else "compose-resources/files/$normalized",
+                                if (normalized.startsWith("compose-resources/")) normalized else "compose-resources/assets/$normalized",
+                            )
+                        val loader = this::class.java.classLoader
+                        candidates.asSequence()
+                            .mapNotNull { path -> loader.getResourceAsStream(path)?.use { it.readBytes().toString(Charsets.UTF_8) } }
+                            .firstOrNull()
+                            ?: error("Resource not found: ${candidates.joinToString()}")
                     }
                     WebViewFileReadType.COMPOSE_RESOURCE_FILES ->
                         URL(fileName).openStream().use { it.readBytes().toString(Charsets.UTF_8) }

@@ -240,6 +240,8 @@ name = "composewebview-wry"
 version = "0.1.0"
 dependencies = [
  "dispatch2",
+ "gdk",
+ "gdkx11",
  "glib",
  "gtk",
  "objc2",
@@ -247,6 +249,7 @@ dependencies = [
  "uniffi",
  "windows 0.58.0",
  "wry",
+ "x11",
 ]
 
 [[package]]

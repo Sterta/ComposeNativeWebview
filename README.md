@@ -1,18 +1,20 @@
 # ComposeWebview
 
-Wry-powered **WebView for Compose Desktop (Kotlin/JVM)**, backed by a small Rust core (wry) exposed via **Gobley/UniFFI**.
+Compose Multiplatform **WebView** with a **KevinnZou/compose-webview-multiplatform-inspired API** under `io.github.kdroidfilter.webview.*`.
 
-This repository exposes a **KevinnZou/compose-webview-multiplatform-inspired API** under `io.github.kdroidfilter.webview.*` so you can keep the same mental model (`WebView`, `WebViewState`, `WebViewNavigator`, cookies, JS bridge) while using a desktop backend.
+- Desktop: **Wry** backend (Rust core via **Gobley/UniFFI**)
+- Android: `android.webkit.WebView`
+- iOS: `WKWebView`
 
 ## Demo
 
-Run the showcase app (recommended first):
+This repo ships a feature showcase app (recommended first):
 
-```bash
-./gradlew :demo:run
-```
+- Desktop (Wry): `./gradlew :demo:run`
+- Android: `./gradlew :demo-android:installDebug` (or `:demo-android:assembleDebug`)
+- iOS: open `iosApp/iosApp.xcodeproj` in Xcode and Run (it calls `./gradlew :demo-shared:embedAndSignAppleFrameworkForXcode`)
 
-The demo includes a “Tools” panel to exercise most APIs (navigation, headers + interceptor, cookies, JS, bridge, settings).
+The demo UI is responsive: on large screens it shows a side “Tools” panel, and on phones it uses a bottom sheet.
 
 ## Features
 
@@ -30,27 +32,32 @@ The demo includes a “Tools” panel to exercise most APIs (navigation, headers
 - **Cookies**
   - `state.cookieManager.setCookie/getCookies/removeCookies/removeAllCookies`
 - **JavaScript**
-  - `navigator.evaluateJavaScript(script)` *(fire-and-forget on desktop right now)*
+  - `navigator.evaluateJavaScript(script)` *(fire-and-forget; no return value)*
   - JS ↔ Kotlin **bridge**: `window.kmpJsBridge.callNative(...)` with callbacks
 - **Settings**
-  - `customUserAgentString` (**implemented**; requires WebView recreation)
+  - `customUserAgentString` (**implemented**; desktop recreates, Android/iOS update in-place)
   - `logSeverity` (internal logging)
 
 ## Limitations (current)
 
-- **Desktop/JVM only** (no Android/iOS in this repo).
+- Desktop + Android demos build from Gradle; iOS requires **macOS + Xcode toolchain** (Kotlin/Native + cinterop).
 - `RequestInterceptor` only applies to **navigations triggered via `WebViewNavigator`** (not to sub-resources like images/XHR loaded by the page).
-- Changing `customUserAgentString` **recreates** the WebView (debounced ~400ms): expect JS context/history loss.
+- On desktop, changing `customUserAgentString` **recreates** the WebView (debounced ~400ms): expect JS context/history loss.
 
 ## Project layout
 
 - `wrywebview/`: Rust core (wry) + UniFFI exports + JVM glue (`WryWebViewPanel`).
 - `wrywebview-compose/`: Compose API layer (`io.github.kdroidfilter.webview.*`).
-- `demo/`: feature showcase app.
+- `demo-shared/`: shared demo UI (`App()`), used by all demo targets.
+- `demo/`: Compose Desktop demo wrapper.
+- `demo-android/`: Android demo app wrapper.
+- `iosApp/`: iOS SwiftUI demo app wrapper (imports the `demoShared` framework).
 
 ## Requirements
 
 - Rust toolchain (`rustup` installed) for building the native core.
+- Android SDK for building the Android target.
+- macOS + Xcode for building iOS targets.
 - Platform deps for the underlying webview (notably on Linux: GTK/WebKitGTK packages depending on your distro).
 - JVM flag (required for JNA native access):
   - `--enable-native-access=ALL-UNNAMED`
@@ -184,9 +191,9 @@ navigator.loadHtml("<html><body><h1>Hello</h1></body></html>")
 
 #### HTML file from resources (assets)
 
-On desktop, `WebViewFileReadType.ASSET_RESOURCES` loads from classpath resources under `assets/`.
+Recommended (cross-platform): put your HTML under Compose Multiplatform resources and load it with `WebViewFileReadType.ASSET_RESOURCES`.
 
-- Put your file here: `src/jvmMain/resources/assets/my_page.html`
+- Put your file here: `src/commonMain/composeResources/files/my_page.html`
 - Load it:
 
 ```kotlin
@@ -195,7 +202,7 @@ import io.github.kdroidfilter.webview.web.WebViewFileReadType
 navigator.loadHtmlFile("my_page.html", WebViewFileReadType.ASSET_RESOURCES)
 ```
 
-The demo includes `demo/src/jvmMain/resources/assets/bridge_playground.html` (JS bridge playground).
+The demo includes `demo-shared/src/commonMain/composeResources/files/bridge_playground.html` (JS bridge playground).
 
 ### RequestInterceptor (pre-navigation)
 

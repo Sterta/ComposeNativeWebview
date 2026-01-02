@@ -25,6 +25,9 @@ incremental = false
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
 glib = "0.18"
+gdk = "0.18"
+gdkx11 = "0.18"
+x11 = "2.21"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch2 = "0.3.0"

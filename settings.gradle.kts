@@ -33,5 +33,7 @@ plugins {
 }
 
 include(":demo")
+include(":demo-shared")
+include(":demo-android")
 include(":wrywebview")
 include(":wrywebview-compose")

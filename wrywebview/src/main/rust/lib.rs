@@ -26,6 +26,9 @@ use state::{get_state, register, unregister, with_webview, WebViewState};
 #[cfg(target_os = "linux")]
 use platform::linux::{ensure_gtk_initialized, run_on_gtk_thread};
 
+#[cfg(target_os = "linux")]
+use wry::WebViewExtUnix;
+
 #[cfg(not(target_os = "linux"))]
 use platform::run_on_main_thread;
 
@@ -228,6 +231,56 @@ fn create_webview_inner(
             }
         })
         .build_as_child(&window)?;
+
+    // On Linux, set up focus handling for the GTK widget
+    #[cfg(target_os = "linux")]
+    {
+        use gdkx11::glib::translate::ToGlibPtr;
+        use gdkx11::glib::Cast;
+        use gdkx11::X11Display;
+        use gtk::prelude::WidgetExt;
+
+        let gtk_widget = webview.webview();
+        gtk_widget.set_can_focus(true);
+
+        // Connect to button-press-event to grab focus when clicked using X11
+        gtk_widget.connect_button_press_event(|widget, _event| {
+            eprintln!("[wrywebview] button_press_event -> grab_focus");
+
+            // Use X11 focus directly for proper keyboard input
+            if let Some(gdk_window) = widget.window() {
+                if let Some(display) = gdk::Display::default() {
+                    if let Ok(x11_display) = display.downcast::<X11Display>() {
+                        unsafe {
+                            let gdk_window_ptr: *mut gdk::ffi::GdkWindow = gdk_window.to_glib_none().0;
+                            let xid = gdkx11::ffi::gdk_x11_window_get_xid(
+                                gdk_window_ptr as *mut gdkx11::ffi::GdkX11Window,
+                            );
+
+                            if xid != 0 {
+                                let x11_display_ptr: *mut gdkx11::ffi::GdkX11Display = x11_display.to_glib_none().0;
+                                let x_display = gdkx11::ffi::gdk_x11_display_get_xdisplay(x11_display_ptr);
+
+                                if !x_display.is_null() {
+                                    x11::xlib::XSetInputFocus(
+                                        x_display as *mut x11::xlib::Display,
+                                        xid,
+                                        x11::xlib::RevertToParent,
+                                        x11::xlib::CurrentTime,
+                                    );
+                                    eprintln!("[wrywebview] button_press XSetInputFocus xid=0x{:x}", xid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            widget.grab_focus();
+            gtk::glib::Propagation::Proceed
+        });
+        eprintln!("[wrywebview] gtk focus handling configured with X11 support");
+    }
 
     let id = register(webview, state)?;
     eprintln!("[wrywebview] create_webview success id={}", id);
@@ -506,6 +559,61 @@ pub fn reload(id: u64) -> Result<(), WebViewError> {
 fn focus_inner(id: u64) -> Result<(), WebViewError> {
     eprintln!("[wrywebview] focus id={}", id);
     with_webview(id, |webview| {
+        // On Linux, we need to use X11 focus directly since the GTK widget
+        // is embedded in a foreign (AWT/Swing) window hierarchy
+        #[cfg(target_os = "linux")]
+        {
+            use gdkx11::glib::translate::ToGlibPtr;
+            use gdkx11::glib::Cast;
+            use gdkx11::X11Display;
+            use gtk::prelude::WidgetExt;
+
+            let gtk_widget = webview.webview();
+            gtk_widget.set_can_focus(true);
+
+            // First, ensure the widget is realized and has a window
+            if !gtk_widget.is_realized() {
+                gtk_widget.realize();
+            }
+
+            // Get the GDK window and use X11 to set focus
+            if let Some(gdk_window) = gtk_widget.window() {
+                // Get the X11 display from GDK
+                if let Some(display) = gdk::Display::default() {
+                    if let Ok(x11_display) = display.downcast::<X11Display>() {
+                        unsafe {
+                            // Get the X11 window ID (XID) from the GDK window
+                            let gdk_window_ptr: *mut gdk::ffi::GdkWindow = gdk_window.to_glib_none().0;
+                            let xid = gdkx11::ffi::gdk_x11_window_get_xid(
+                                gdk_window_ptr as *mut gdkx11::ffi::GdkX11Window,
+                            );
+
+                            if xid != 0 {
+                                // Get the raw X11 display pointer
+                                let x11_display_ptr: *mut gdkx11::ffi::GdkX11Display = x11_display.to_glib_none().0;
+                                let x_display = gdkx11::ffi::gdk_x11_display_get_xdisplay(x11_display_ptr);
+
+                                if !x_display.is_null() {
+                                    // XSetInputFocus: RevertToParent = 2, CurrentTime = 0
+                                    x11::xlib::XSetInputFocus(
+                                        x_display as *mut x11::xlib::Display,
+                                        xid,
+                                        x11::xlib::RevertToParent,
+                                        x11::xlib::CurrentTime,
+                                    );
+                                    eprintln!("[wrywebview] XSetInputFocus xid=0x{:x}", xid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also call GTK grab_focus as a fallback
+            gtk_widget.grab_focus();
+            eprintln!("[wrywebview] gtk grab_focus called");
+        }
+
         webview
             .evaluate_script("document.documentElement.focus(); window.focus();")
             .map_err(WebViewError::from)
