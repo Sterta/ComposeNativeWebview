@@ -1,12 +1,12 @@
 name: Publish to Maven Central
 
 on:
-  push:
-    tags:
-      - "**"
+  release:
+    types: [published]
 
 jobs:
   build-rust-macos-aarch64:
+    if: startsWith(github.event.release.tag_name, 'v')
     runs-on: macos-14
     steps:
       - name: Checkout code
@@ -27,6 +27,7 @@ jobs:
           retention-days: 1
 
   build-rust-macos-x86_64:
+    if: startsWith(github.event.release.tag_name, 'v')
     runs-on: macos-13
     steps:
       - name: Checkout code
@@ -47,6 +48,7 @@ jobs:
           retention-days: 1
 
   build-rust-linux:
+    if: startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -72,6 +74,7 @@ jobs:
           retention-days: 1
 
   build-rust-windows:
+    if: startsWith(github.event.release.tag_name, 'v')
     runs-on: windows-latest
     steps:
       - name: Checkout code
@@ -92,6 +95,7 @@ jobs:
           retention-days: 1
 
   publish:
+    if: startsWith(github.event.release.tag_name, 'v')
     needs:
       - build-rust-macos-aarch64
       - build-rust-macos-x86_64
@@ -101,6 +105,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Set version from tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION_NAME="${TAG#v}"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          sed -i.bak "s/^VERSION_NAME=.*/VERSION_NAME=$VERSION_NAME/" gradle.properties
+          rm -f gradle.properties.bak
 
       - name: Download macOS aarch64 native library
         uses: actions/download-artifact@v4
