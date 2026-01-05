@@ -41,43 +41,6 @@ Desktop engines:
 * **Linux**: WebKitGTK
 
 ---
-## Why ComposeNativeWebView? ⚡
-
-### Native engines. No bundled Chromium.
-
-Unlike KCEF-based solutions, **Desktop uses the OS webview**:
-
-* **Windows**: WebView2
-* **macOS**: WKWebView
-* **Linux**: WebKitGTK
-
-👉 Smaller binaries, faster startup, system-level rendering.
-
----
-
-### Tiny desktop footprint 📦
-
-Desktop ships only:
-
-* a **minimal JVM bridge**
-* **native bindings** (UniFFI + Rust)
-
-No embedded browser runtime.
-
----
-
-### Familiar Compose WebView API 🧩
-
-Same mental model as `compose-webview-multiplatform`:
-
-* `WebViewState`
-* `WebViewNavigator`
-* observable loading state
-* cookies
-* JS ↔ Kotlin bridge
-* request interception for app-driven navigation
-
----
 
 ## Quick start 🚀
 
